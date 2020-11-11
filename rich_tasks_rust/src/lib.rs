@@ -16,6 +16,7 @@ use {
         task::{Context, Poll},
         result::Result,
     },
+    threadpool::ThreadPool,
 };
 // JW: send means you can transfer across thread boundaries
 
@@ -26,6 +27,8 @@ pub struct Executor {
 
 impl Executor {
     pub fn run(&self) {
+        let n_workers = 4;
+        let pool = ThreadPool::new(n_workers);
         let mut run_queue = BinaryHeap::new();
         loop {
             // JW: Populate run queue.
@@ -40,30 +43,34 @@ impl Executor {
             }
 
             // PS: Run the next task.
+
             if let Some(task) = run_queue.pop() {
-                // PS: Take the future, and if it has not yet completed (is still Some),
-                // poll it in an attempt to complete it.
-                let mut future_slot = task.future.lock().unwrap();
-                // future_slot should be of type BoxFuture
-                if let Some(mut future) = future_slot.take() {
-                    // PS: Create a `LocalWaker` from the task itself
-                    // JW: TODO: find out about LocalWaker;; https://docs.rs/futures/0.3.5/futures/task/struct.Waker.html
-                    // Probably moves something from wait queue to run queue
-                    let waker = waker_ref(&task);
-                    let context = &mut Context::from_waker(&*waker);
-                    // `BoxFuture<T>` is a type alias for
-                    // `Pin<Box<dyn Future<Output = T> + Send + 'static>>`.
-                    // We can get a `Pin<&mut dyn Future + Send + 'static>`
-                    // from it by calling the `Pin::as_mut` method.
-                    if let Poll::Pending = future.as_mut().poll(context) {
-                        // JW: To poll futures they must be pinned; run the future as far as possible
-                        // Alternatively, Poll::Ready if it's not pending and completed
-                        //
-                        // PS: We're not done processing the future, so put it
-                        // back in its task to be run again in the future.
-                        *future_slot = Some(future);
+                pool.execute(move|| {
+                    // PS: Take the future, and if it has not yet completed (is still Some),
+                    // poll it in an attempt to complete it.
+                    let mut future_slot = task.future.lock().unwrap();
+                    // future_slot should be of type BoxFuture
+                    if let Some(mut future) = future_slot.take() {
+                        // PS: Create a `LocalWaker` from the task itself
+                        // JW: TODO: find out about LocalWaker;; https://docs.rs/futures/0.3.5/futures/task/struct.Waker.html
+                        // Probably moves something from wait queue to run queue
+                        let waker = waker_ref(&task);
+                        let context = &mut Context::from_waker(&*waker);
+                        // `BoxFuture<T>` is a type alias for
+                        // `Pin<Box<dyn Future<Output = T> + Send + 'static>>`.
+                        // We can get a `Pin<&mut dyn Future + Send + 'static>`
+                        // from it by calling the `Pin::as_mut` method.
+                        
+                        if let Poll::Pending = future.as_mut().poll(context) {
+                            // JW: To poll futures they must be pinned; run the future as far as possible
+                            // Alternatively, Poll::Ready if it's not pending and completed
+                            //
+                            // PS: We're not done processing the future, so put it
+                            // back in its task to be run again in the future.
+                            *future_slot = Some(future);
+                        }
                     }
-                }
+                });
             }
         }
     }
@@ -77,14 +84,10 @@ pub struct Spawner {
 }
 
 impl Spawner {
-    pub fn spawn(&self, future: impl Future<Output = Result<(), Aborted>> + 'static + Send) {
-        let future = future.boxed();
-        let task = Arc::new(Task {
-            future: Mutex::new(Some(future)),
-            priority: 20,
-            task_sender: self.task_sender.clone(),
-        });
-        self.task_sender.send(task).expect("too many tasks queued");
+    pub fn spawn<F>(&self, future:F) 
+    where F : Future<Output = ()> + Send + 'static
+    {
+        self.spawn_preemptable(future,20);
     }
 
     pub fn spawn_abortable_with_priority<F>(&self, future:F, priority: u8) 
