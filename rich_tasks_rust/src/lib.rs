@@ -60,7 +60,7 @@ impl Executor {
                     print_status(&task.name, &String::from("POPPED TASK"));
                     // PS: Take the future, and if it has not yet completed (is still Some),
                     // poll it in an attempt to complete it.
-                    let mut future_slot = task.future.lock().unwrap(); future_slot should be of type BoxFuture
+                    let mut future_slot = task.future.lock().unwrap(); //future_slot should be of type BoxFuture
                     if let Some(mut future) = future_slot.take() {
                         // PS: Create a `LocalWaker` from the task itself
                         // JW: TODO: find out about LocalWaker;; https://docs.rs/futures/0.3.5/futures/task/struct.Waker.html
@@ -80,7 +80,8 @@ impl Executor {
                             // back in its task to be run again in the future.
                             *future_slot = Some(future);
                         } else {
-                            print_status(&task.name, &String::from("TASK FINISHED"));
+
+                            print_status(&task.name, &String::from("TASK FINISHED"))
                         }
 
                     }
