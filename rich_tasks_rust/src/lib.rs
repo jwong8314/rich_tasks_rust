@@ -7,6 +7,7 @@ use {
     // PS: The timer we wrote in the previous section:
     // timer_future::TimerFuture,
     std::{
+        time::{Duration, SystemTime},
         cmp::Ordering,
         collections::BinaryHeap,
         future::Future,
@@ -20,10 +21,19 @@ use {
 };
 // JW: send means you can transfer across thread boundaries
 
+pub fn print_status( name : &String , status : &String){
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+       Ok(n) =>  println!("Task: {}; Time: {}; Status: {}", name, n.subsec_nanos(), status ),
+       Err(_) => panic!("SystemTime before UNIX EPOCH"),
+    }
+}
+
+
 /// PS: Task executor that receives tasks off of a channel and runs them.
 pub struct Executor {
     ready_queue: Receiver<Arc<Task>>,
 }
+
 
 impl Executor {
     pub fn run(&self) {
@@ -46,10 +56,11 @@ impl Executor {
 
             if let Some(task) = run_queue.pop() {
                 pool.execute(move|| {
+
+                    print_status(&task.name, &String::from("POPPED TASK"));
                     // PS: Take the future, and if it has not yet completed (is still Some),
                     // poll it in an attempt to complete it.
-                    let mut future_slot = task.future.lock().unwrap();
-                    // future_slot should be of type BoxFuture
+                    let mut future_slot = task.future.lock().unwrap(); future_slot should be of type BoxFuture
                     if let Some(mut future) = future_slot.take() {
                         // PS: Create a `LocalWaker` from the task itself
                         // JW: TODO: find out about LocalWaker;; https://docs.rs/futures/0.3.5/futures/task/struct.Waker.html
@@ -68,7 +79,10 @@ impl Executor {
                             // PS: We're not done processing the future, so put it
                             // back in its task to be run again in the future.
                             *future_slot = Some(future);
+                        } else {
+                            print_status(&task.name, &String::from("TASK FINISHED"));
                         }
+
                     }
                 });
             }
@@ -98,6 +112,7 @@ impl Spawner {
         let future = future.boxed();
         let task = Arc::new(Task {
             future: Mutex::new(Some(future)),
+            name:String::from("<TASK NAME>"),
             priority,
             task_sender: self.task_sender.clone(),
         });
@@ -125,6 +140,8 @@ struct Task {
     /// executor would not need this, and could use `UnsafeCell` instead.
     future: Mutex<Option<BoxFuture<'static, Result<(), Aborted>>>>,
 
+    ///Task Name:
+    name: String,
     /// Tasks with smaller priorities are executed first.
     priority: u8,
 
